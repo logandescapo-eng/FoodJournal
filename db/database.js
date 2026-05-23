@@ -1,27 +1,17 @@
-import * as SQLite from "expo-sqlite";
+import { openDatabaseAsync } from "expo-sqlite";
 
-const db = SQLite.openDatabase("foodjournal.db");
+let db = null;
 
-const executeSql = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.transaction(
-      (tx) => {
-        tx.executeSql(
-          sql,
-          params,
-          (_, result) => resolve(result),
-          (_, error) => {
-            reject(error);
-            return false;
-          }
-        );
-      },
-      reject
-    );
-  });
+const getDb = async () => {
+  if (!db) {
+    db = await openDatabaseAsync("foodjournal.db");
+  }
+  return db;
+};
 
 export const initDatabase = async () => {
-  await executeSql(`
+  const database = await getDb();
+  await database.execAsync(`
     CREATE TABLE IF NOT EXISTS users (
       id        INTEGER PRIMARY KEY AUTOINCREMENT,
       username  TEXT    NOT NULL UNIQUE,
@@ -30,8 +20,7 @@ export const initDatabase = async () => {
       createdAt TEXT    DEFAULT (datetime('now'))
     );
   `);
-
-  await executeSql(`
+  await database.execAsync(`
     CREATE TABLE IF NOT EXISTS journal_entries (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       userId      INTEGER NOT NULL,
@@ -42,18 +31,18 @@ export const initDatabase = async () => {
       FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
     );
   `);
-
   console.log("Database initialised successfully");
 };
 
 // ─── User operations ──────────────────────────────────────────────────────────
 export const registerUser = async (username, password, email) => {
   try {
-    const result = await executeSql(
+    const database = await getDb();
+    const result = await database.runAsync(
       "INSERT INTO users (username, password, email) VALUES (?, ?, ?)",
       [username, password, email]
     );
-    return { success: true, userId: result.insertId };
+    return { success: true, userId: result.lastInsertRowId };
   } catch (error) {
     const message = error.message || "Database error";
     if (message.includes("UNIQUE constraint failed: users.username")) {
@@ -68,11 +57,11 @@ export const registerUser = async (username, password, email) => {
 
 export const loginUser = async (username, password) => {
   try {
-    const result = await executeSql(
+    const database = await getDb();
+    const user = await database.getFirstAsync(
       "SELECT * FROM users WHERE username = ? AND password = ?",
       [username, password]
     );
-    const user = result.rows._array[0];
     if (user) return { success: true, user };
     return { success: false, error: "Invalid username or password" };
   } catch (error) {
@@ -83,35 +72,37 @@ export const loginUser = async (username, password) => {
 // ─── Journal entry operations ─────────────────────────────────────────────────
 export const addJournalEntry = async (userId, imageUri, description, category) => {
   try {
-    const result = await executeSql(
+    const database = await getDb();
+    const result = await database.runAsync(
       "INSERT INTO journal_entries (userId, imageUri, description, category) VALUES (?, ?, ?, ?)",
       [userId, imageUri, description, category]
     );
-    return { success: true, entryId: result.insertId };
+    return { success: true, entryId: result.lastInsertRowId };
   } catch (error) {
     return { success: false, error: error.message || "Database error" };
   }
 };
 
 export const getAllEntries = async (userId) => {
-  const result = await executeSql(
+  const database = await getDb();
+  return database.getAllAsync(
     "SELECT * FROM journal_entries WHERE userId = ? ORDER BY createdAt DESC",
     [userId]
   );
-  return result.rows._array;
 };
 
 export const getEntriesByCategory = async (userId, category) => {
-  const result = await executeSql(
+  const database = await getDb();
+  return database.getAllAsync(
     "SELECT * FROM journal_entries WHERE userId = ? AND category = ? ORDER BY createdAt DESC",
     [userId, category]
   );
-  return result.rows._array;
 };
 
 export const updateJournalEntry = async (id, description, category) => {
   try {
-    await executeSql(
+    const database = await getDb();
+    await database.runAsync(
       "UPDATE journal_entries SET description = ?, category = ? WHERE id = ?",
       [description, category, id]
     );
@@ -123,7 +114,8 @@ export const updateJournalEntry = async (id, description, category) => {
 
 export const deleteJournalEntry = async (id) => {
   try {
-    await executeSql("DELETE FROM journal_entries WHERE id = ?", [id]);
+    const database = await getDb();
+    await database.runAsync("DELETE FROM journal_entries WHERE id = ?", [id]);
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message || "Database error" };
@@ -131,9 +123,9 @@ export const deleteJournalEntry = async (id) => {
 };
 
 export const getCategories = async (userId) => {
-  const result = await executeSql(
+  const database = await getDb();
+  return database.getAllAsync(
     "SELECT DISTINCT category FROM journal_entries WHERE userId = ? ORDER BY category ASC",
     [userId]
   );
-  return result.rows._array;
 };
